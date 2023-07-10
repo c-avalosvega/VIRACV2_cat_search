@@ -1,0 +1,296 @@
+#!/usr/bin/env python
+# coding: utf-8
+
+#The necessary libraries are imported
+
+from astropy.coordinates import SkyCoord
+import astropy.units as u
+from astropy.table import Table, vstack
+from astropy.io import fits
+from astropy.coordinates import Angle
+
+import glob 
+import matplotlib.pyplot as plt
+from matplotlib.patches import Circle
+
+import cartopy.crs as ccrs
+import time
+
+###############-Functions-#################################
+
+def eq(ele):
+    
+    # The script asks the user for the coordinates and radius
+    
+    ra,dec,radius = None,None,None
+    
+    while ra is None or not (180 <= ra <= 300):
+        try:
+            ra = float(input("Enter the RA coordinate in degrees (180 to 300): "))
+        except ValueError:
+            print("You must enter a number")
+        
+    while dec is None or not (-80 <= dec <= 0):
+        try:
+            dec = float(input("Enter the DEC coordinate in degrees (-80 to 0): "))
+        except ValueError:
+            print("You must enter a number")
+            
+    while radius is None or not (0. < radius <= 5.):
+        try:
+            radius = float(input("Enter the radius in degrees (0 to 5): "))
+        except ValueError:
+            print("You must enter a number")
+    
+    # we save the ra and dec for later
+    center = ra, dec
+    
+    # transformation of the entered coordinate
+    coord_eq = SkyCoord(ra=ra*u.deg, dec=dec*u.deg, frame='icrs')
+    
+    return coord_eq, radius, center
+
+
+def gal(ele):
+    
+    # The script asks the user for the coordinates and radius
+    
+    l, b, radius = None,None,None
+    
+    while l is None or not (0 <= l <= 350):
+        try:
+            l = float(input("Enter the galactic longitude in degrees (0 to 350): "))
+        except ValueError:
+            print("You must enter a number")
+        
+    while b is None or not (-15 <= b <= 10):
+        try:
+            b = float(input("Enter the galactic latitude in degrees (-15 to 10): "))
+        except ValueError:
+            print("You must enter a number")
+            
+    while radius is None or not (0. < radius <= 5.):
+        try:
+            radius = float(input("Enter the radius in degrees (0 to 5): "))
+        except ValueError:
+            print("You must enter a number")
+            
+    # we save the galactic longitude and latitude for later
+    center = l, b 
+        
+    # transformation of the entered coordinate
+    coord_gal = SkyCoord(l=l*u.deg, b=b*u.deg, frame='galactic')
+    
+    return coord_gal, radius, center
+
+
+def loop_coordinates(files, coordinate_type, c_user, radius):
+    # List of sources to find
+    selected_data = []
+    
+    # List of files to use
+    file_names = []
+    
+    selected_data_all = None
+    
+    for filename in files:
+        data = Table.read(filename)
+        
+        # Find sources within the coordinates range specified by the user
+        # Convert the coordinates of each source to SkyCoord objects
+        if coordinate_type == "Equatorial":
+            coord = SkyCoord(ra=data['ra']*u.deg, dec=data['dec']*u.deg, frame='icrs')
+        elif coordinate_type == "Galactic":
+            coord = SkyCoord(l=data['l']*u.deg, b=data['b']*u.deg, frame='galactic')
+        
+        # Calculate the angular distance between the user's coordinates and the coordinates of the file
+        sep = coord.separation(c_user)
+        
+        # Select table rows that are within the radius specified by the user
+        selected_data_file = data[sep <= radius*u.deg]
+        
+        # Add found sources to selected_data
+        if len(selected_data_file) > 0:
+            selected_data.append(selected_data_file)
+            file_names.append(filename)
+    
+    # Concatenate selected data into a single table
+    try:
+        selected_data_all = vstack(selected_data)
+    except ValueError:
+        print("No sources were found in the radius and indicated coordinates")      
+    
+    return file_names, selected_data_all
+
+
+def veri_n_save(ele, con_data):
+    
+    # Checking for duplicate values and saving the file
+    
+    if ele == "Equatorial":
+        column_name = 'ra'
+    elif ele == "Galactic":
+        column_name = 'l'
+    
+    column_data = con_data[column_name]
+    
+    if len(column_data) != len(set(column_data)):
+        print("There are repeated values in the list")
+    else:
+        print("There are no repeated values in the list\nThe selected sources have been saved on your computer")
+        # The script writes the selected data to a new fits file
+        con_data.write('sources_found.fits', format='fits', overwrite=True)
+        
+
+def visual(ele, conca_data, radius, center_coords):
+
+    fig = plt.figure(figsize=(12, 6))
+    ax = fig.add_subplot(111, projection=ccrs.Mollweide())
+
+    if ele == "Equatorial":
+        x_data, y_data = 'ra', 'dec'
+        ax.set_xlabel('RA (degrees)')
+        ax.set_ylabel('DEC (degrees)')
+    elif ele == "Galactic":
+        x_data, y_data = 'l', 'b'
+        ax.set_xlabel('Galactic Longitude (degrees)')
+        ax.set_ylabel('Galactic Latitude (degrees)')
+
+    ra = conca_data[x_data]
+    dec = conca_data[y_data]
+
+    center_ra = center_coords[0]
+    center_dec = center_coords[1]
+
+    ax.scatter(ra, dec, s=0.1, transform=ccrs.PlateCarree())
+
+    circle = Circle((center_ra, center_dec), radius,
+                    linestyle='--', edgecolor='black', facecolor='none', transform=ccrs.PlateCarree())
+    ax.add_patch(circle)
+
+    ax.set_extent([center_ra - radius - 3, center_ra + radius + 3,
+                   center_dec - radius - 3, center_dec + radius + 3], crs=ccrs.PlateCarree())
+
+    ax.gridlines()
+    
+    # Add labels
+    ax.set_title('Sources within {:.2f} degree radius'.format(radius))
+
+    # Hide ticks
+    ax.set_xticks([])
+    ax.set_yticks([])
+
+    print(f"The total number of sources are: {len(conca_data)}")
+    plt.show()
+
+
+def total_map(ele, all_data):
+    
+    fig = plt.figure(figsize=(12, 6))
+    ax = fig.add_subplot(111, projection='aitoff')
+
+    if ele == "Equatorial":
+        x_col, y_col = 'ra', 'dec'
+        ax.set_xlabel('RA (degrees)')
+        ax.set_ylabel('DEC (degrees)')
+        
+    elif ele == "Galactic":
+        x_col, y_col = 'l', 'b'
+        ax.set_xlabel('Galactic Longitude (degrees)')
+        ax.set_ylabel('Galactic Latitude (degrees)')
+
+    ra_rad = Angle(all_data[x_col], unit='degree').wrap_at(180 * u.deg).radian
+    dec_rad = Angle(all_data[y_col], unit='degree').radian
+
+    ax.scatter(ra_rad, dec_rad, s=0.1)
+    ax.grid(True)
+
+    print(f"The total number of sources in our sample: {len(all_data)}")
+    plt.show()
+
+###################################################################
+
+# Looking for the fits files in my directory
+fits_files = glob.glob("*v1.fits")
+
+
+print("Hello!\nIn this script, you can select objects within the VIRAC V2 catalog by entering coordinates and a specific radius.")
+print("The available coordinate systems are Equatorial and Galactic.")
+print("Additionally, you will be able to visualize the selected area")
+time.sleep(2)
+
+
+elec = None
+
+while elec not in ["Equatorial", "Galactic"]:
+    elec = input("Which coordinate system do you want to use? Enter 'Equatorial' or 'Galactic': ")
+
+if elec == "Equatorial":
+    print("You have chosen the Equatorial coordinate system.")
+    # This function asks the user to enter the parameters
+    c_eq, r_eq, center_eq = eq(elec)
+    
+    # with the following function the sources are selected
+    # the names of these sources and a list of the data obtained are given 
+    names_eq, con_data_eq = loop_coordinates(fits_files, elec, c_eq, r_eq)
+    
+    if con_data_eq is not None and len(con_data_eq) > 0:
+
+        # it is verified that there are no duplicate sources and the sources found are saved in a new fits
+        veri_n_save(elec, con_data_eq)
+        
+        # The user is asked if he wants to see the visualization
+        show_visualization = input("Do you want to see the visualization of the selected area? (yes/no): ")
+        
+        if show_visualization.lower() == "yes":
+            # Sources obtained are displayed
+            visual(elec, con_data_eq, r_eq, center_eq)
+        else:
+            pass
+    else:
+        pass
+    
+elif elec == "Galactic":
+    print("You have chosen the Galactic coordinate system.")
+    c_gal, r_gal, center_gal = gal(elec)
+    
+    # the names of these sources and a list of the data obtained are given 
+    names_gal, con_data_gal = loop_coordinates(fits_files, elec, c_gal, r_gal)
+    
+    if con_data_gal is not None and len(con_data_gal) > 0:
+        
+        # it is verified that there are no duplicate sources and the sources found are saved in a new fits
+        veri_n_save(elec, con_data_gal)
+        
+        # The user is asked if he wants to see the visualization
+        show_visualization = input("Do you want to see the visualization of the selected area? (yes/no): ")
+        
+        if show_visualization.lower() == "yes":
+            # Sources obtained are displayed
+            visual(elec, con_data_gal, r_gal, center_gal)
+        else:
+            pass
+    else:
+        pass
+
+
+
+# The user is asked if they wants to see the full sample display
+show_all_visualization = input("Do you want to see the visualization of the entire sample? (yes/no): ")
+
+if show_all_visualization.lower() == "yes":
+    # The data of all the fits are concadenated to make the map of all the sources
+    total = []
+
+    # Loop through each file
+    for filename in fits_files:
+        data = Table.read(filename, format='fits')
+        total.append(data)
+
+    # Concatenate all the selected data into a single table
+    selected_data_all = vstack(total)
+    
+    # the entire sample is displayed
+    total_map(elec, selected_data_all)
+else:
+    pass
