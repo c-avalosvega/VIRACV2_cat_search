@@ -57,9 +57,9 @@ def gal(ele):
     
     l, b, radius = None,None,None
     
-    while l is None or not (0 <= l <= 350):
+    while l is None or not (0 <= l <= 360):
         try:
-            l = float(input("Enter the galactic longitude in degrees (0 to 350): "))
+            l = float(input("Enter the galactic longitude in degrees (0 to 360): "))
         except ValueError:
             print("You must enter a number")
         
