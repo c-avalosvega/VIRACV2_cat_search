@@ -275,7 +275,7 @@ elif elec == "Galactic":
 
 
 
-# The user is asked if they wants to see the full sample display
+# The user is asked if they want to see the full sample display
 show_all_visualization = input("Do you want to see the visualization of the entire sample? (yes/no): ")
 
 if show_all_visualization.lower() == "yes":
